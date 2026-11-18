@@ -1,5 +1,5 @@
 {
- "last_run": "1794981543.157313",
+ "last_run": "1794982640.2092144",
  "entries": [
   {
    "channel": "C0CJRSZ0420",
@@ -10,7 +10,11 @@
    "user": "Avinash Aravind",
    "note": "",
    "in_thread": false,
-   "title": "[2608.12271] Earth observation embeddings are effective sub-grid descriptors for probabilistic weather downscaling"
+   "title": "Earth observation embeddings are effective sub-grid descriptors for probabilistic weather downscaling",
+   "authors": "Sousa, Tebbutt, Jaffer et al.",
+   "venue": "arXiv",
+   "year": "2026",
+   "meta_version": 2
   },
   {
    "channel": "C0CJRSZ0420",
@@ -21,7 +25,11 @@
    "user": "Avinash Aravind",
    "note": "This company Zeus AI is making AI/ML weather models, they came out with this cool new weather world model yesterday that takes in raw observational data and creates a constant state of the atmosphere based on how all those observational instruments would see it. Cool stuff I think! Their blog post: ",
    "in_thread": false,
-   "title": "Introducing WeatherDreamer: A World Model for the Weather | Zeus AI"
+   "title": "Introducing WeatherDreamer: A World Model for the Weather",
+   "authors": "",
+   "venue": "Zeus AI",
+   "year": "",
+   "meta_version": 2
   },
   {
    "channel": "C0CJRSZ0420",
@@ -32,7 +40,11 @@
    "user": "Avinash Aravind",
    "note": "This company Zeus AI is making AI/ML weather models, they came out with this cool new weather world model yesterday that takes in raw observational data and creates a constant state of the atmosphere based on how all those observational instruments would see it. Cool stuff I think! Their blog post: ",
    "in_thread": false,
-   "title": "https://arxiv.org/pdf/2611.18393"
+   "title": "WeatherDreamer: Learning a World Model from Multimodal Earth Observations",
+   "authors": "Duffy, Penn, Ballard et al.",
+   "venue": "arXiv",
+   "year": "2026",
+   "meta_version": 2
   }
  ]
 }
