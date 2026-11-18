@@ -21,10 +21,22 @@ from urllib.parse import urlparse
 import requests
 
 TOKEN = os.environ["SLACK_BOT_TOKEN"]
-CHANNELS = dict(
-    (cid.strip(), page.strip())
-    for cid, page in (c.split(":", 1) for c in os.environ["CHANNELS"].split(",") if c.strip())
-)
+def parse_channels(raw):
+    """'C012ABC:papers,C034DEF:resources' -> {id: page}. Keeps only characters a Slack ID / page
+    slug can contain, so stray quotes, spaces, or invisible characters picked up when copying
+    the value (BOM, zero-width space) can't silently corrupt an ID."""
+    out = {}
+    for item in raw.split(","):
+        if ":" not in item:
+            continue
+        cid, page = item.split(":", 1)
+        cid, page = re.sub(r"[^A-Z0-9]", "", cid.upper()), re.sub(r"[^\w-]", "", page, flags=re.A)
+        if cid and page:
+            out[cid] = page
+    return out
+
+
+CHANNELS = parse_channels(os.environ["CHANNELS"])
 DATA = Path("data/archive.json")
 DOCS = Path("docs")
 HEADERS = {"Authorization": f"Bearer {TOKEN}"}
@@ -308,6 +320,27 @@ def archive_channel(channel, page, since, db, seen):
     return stats
 
 
+def debug_channel(channel):
+    """DEBUG=1: dump what Slack says about a channel, bypassing all of our filtering."""
+    print(f"  [debug] raw CHANNELS = {os.environ['CHANNELS']!r}")
+    print(f"  [debug] parsed id = {channel!r}")
+    try:
+        c = slack("conversations.info", channel=channel)["channel"]
+        print("  [debug] info:", {k: c.get(k) for k in ("id", "name", "is_member", "is_private", "is_archived", "is_ext_shared")})
+    except Exception as exc:
+        print(f"  [debug] info failed: {exc}")
+    try:
+        j = slack("conversations.history", channel=channel, limit=5)  # no `oldest`: newest 5, any age
+        print(f"  [debug] history: {len(j['messages'])} messages, has_more={j.get('has_more')}, "
+              f"warnings={j.get('response_metadata', {}).get('warnings') or j.get('warning')}")
+        for m in j["messages"]:
+            age = (time.time() - float(m["ts"])) / 86400
+            print(f"  [debug]   ts={m['ts']} ({age:.1f} days ago) subtype={m.get('subtype')} "
+                  f"keys={sorted(m)} text={m.get('text', '')[:80]!r}")
+    except Exception as exc:
+        print(f"  [debug] history failed: {exc}")
+
+
 def channel_name(channel):
     try:
         return "#" + slack("conversations.info", channel=channel)["channel"]["name"]
@@ -342,6 +375,8 @@ def main():
         try:
             stats = archive_channel(channel, page, since, db, seen)
             print(f"{channel} {channel_name(channel)} -> {page}: {stats}")
+            if os.environ.get("DEBUG", "").lower() in ("1", "true"):
+                debug_channel(channel)
         except Exception as exc:  # e.g. not_in_channel, channel_not_found
             failed.append(channel)
             print(f"::error::channel {channel} ({page}): {exc}")
