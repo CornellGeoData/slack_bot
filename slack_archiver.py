@@ -202,13 +202,14 @@ def paginate(method, **params):
             return msgs
 
 
-def fetch_new(channel, since):
+def fetch_new(channel, since, stats):
     """Yield (message, is_thread_reply) for everything posted after `since`,
     including new replies in older threads."""
     # Scan the whole visible window (90 days) so threads that get new replies
     # long after the parent message was posted are still caught.
     window_start = str(time.time() - 90 * 86400)
     for parent in paginate("conversations.history", channel=channel, oldest=window_start):
+        stats["in_window"] += 1
         if float(parent["ts"]) > float(since):
             yield parent, False
         if parent.get("reply_count") and float(parent.get("latest_reply", 0)) > float(since):
@@ -280,9 +281,10 @@ def message_content(msg):
 
 
 def archive_channel(channel, page, since, db, seen):
-    stats = {"messages": 0, "with_links": 0, "added": 0, "skipped_subtypes": {}, "file_only": 0}
-    for msg, in_thread in fetch_new(channel, since):
-        stats["messages"] += 1
+    # in_window: top-level messages visible in the last 90 days; new: messages/replies after `since`
+    stats = {"in_window": 0, "new": 0, "with_links": 0, "added": 0, "skipped_subtypes": {}, "file_only": 0}
+    for msg, in_thread in fetch_new(channel, since, stats):
+        stats["new"] += 1
         if (sub := msg.get("subtype")) in ("channel_join", "bot_message"):
             stats["skipped_subtypes"][sub] = stats["skipped_subtypes"].get(sub, 0) + 1
             continue
@@ -334,6 +336,7 @@ def main():
     # link detection). Safe: links already archived are skipped via `seen`.
     since = "0" if os.environ.get("RESCAN", "").lower() in ("1", "true") else db["last_run"]
 
+    print(f"Scanning messages after {since} ({'RESCAN: full 90-day window' if since == '0' else 'since last_run'})")
     failed = []
     for channel, page in CHANNELS.items():
         try:
