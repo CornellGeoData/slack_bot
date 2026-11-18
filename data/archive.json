@@ -1,5 +1,5 @@
 {
- "last_run": "1794983878.2394886",
+ "last_run": "1794984014.5093827",
  "entries": [
   {
    "channel": "C0CJRSZ0420",
@@ -44,6 +44,79 @@
    "authors": "Duffy, Penn, Ballard et al.",
    "venue": "arXiv",
    "year": "2026",
+   "meta_version": 2
+  },
+  {
+   "channel": "C0CKGJNB0D6",
+   "page": "datasets-and-resources",
+   "url": "https://www.noaa.gov/jetstream",
+   "ts": "1794955339.337209",
+   "date": "2026-11-17",
+   "user": "Avinash Aravind",
+   "note": "If you ever want to learn anything weather-related at a basic but surprisingly robust level check out NOAA JetStream",
+   "in_thread": false,
+   "title": "https://www.noaa.gov/jetstream",
+   "venue": "noaa.gov",
+   "meta_version": 2
+  },
+  {
+   "channel": "C0CKGJNB0D6",
+   "page": "datasets-and-resources",
+   "url": "https://www.hec.usace.army.mil/software/hec-hms/",
+   "ts": "1794955315.236529",
+   "date": "2026-11-17",
+   "user": "Aya Saute",
+   "note": "a pretty cool watershed modeling software developed by the army corps!",
+   "in_thread": false,
+   "title": "HEC-HMS",
+   "authors": "",
+   "venue": "hec.usace.army.mil",
+   "year": "",
+   "meta_version": 2
+  },
+  {
+   "channel": "C0CKGJNB0D6",
+   "page": "datasets-and-resources",
+   "url": "https://dynamical.org/",
+   "ts": "1794955180.583669",
+   "date": "2026-11-17",
+   "user": "Avinash Aravind",
+   "note": "A whole archive of cloud-optimized weather forecasts going back many years. Most of them are \u201cvirtual\u201d which are annoying for anything other than making maps and maybe some spatial modeling, but the few that are not virtual are time-series optimized and could be interesting to throw one of those zer",
+   "in_thread": false,
+   "title": "Cloud-optimized weather & climate data",
+   "authors": "",
+   "venue": "dynamical.org",
+   "year": "",
+   "meta_version": 2
+  },
+  {
+   "channel": "C0CKGJNB0D6",
+   "page": "datasets-and-resources",
+   "url": "https://app.earthmover.io/marketplace",
+   "ts": "1794955103.544939",
+   "date": "2026-11-17",
+   "user": "Avinash Aravind",
+   "note": "Marketplace, contains many datasets mainly of weather model data but also a lot of ocean models, general earth embeddings, and a couple of other stuff. They keep adding new things! You can use them for free but you have to make an account under an \u201corganization\u201d.",
+   "in_thread": false,
+   "title": "Marketplace",
+   "authors": "",
+   "venue": "Arraylake",
+   "year": "",
+   "meta_version": 2
+  },
+  {
+   "channel": "C0CKGJNB0D6",
+   "page": "datasets-and-resources",
+   "url": "http://Earthmover.io",
+   "ts": "1794955103.544939",
+   "date": "2026-11-17",
+   "user": "Avinash Aravind",
+   "note": "Marketplace, contains many datasets mainly of weather model data but also a lot of ocean models, general earth embeddings, and a couple of other stuff. They keep adding new things! You can use them for free but you have to make an account under an \u201corganization\u201d.",
+   "in_thread": false,
+   "title": "Earthmover",
+   "authors": "",
+   "venue": "Earthmover",
+   "year": "",
    "meta_version": 2
   }
  ]
