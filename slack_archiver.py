@@ -13,7 +13,10 @@ import re
 import sys
 import time
 from datetime import datetime, timezone
+from html.parser import HTMLParser
+from itertools import groupby
 from pathlib import Path
+from urllib.parse import urlparse
 
 import requests
 
@@ -25,6 +28,9 @@ CHANNELS = dict(
 DATA = Path("data/archive.json")
 DOCS = Path("docs")
 HEADERS = {"Authorization": f"Bearer {TOKEN}"}
+UA = "slack-research-archiver/1.0"
+# Bump when enrich() improves; entries with an older version get their metadata refreshed once.
+META_VERSION = 2
 
 # Slack wraps links as <https://url|label> or <https://url>
 SLACK_LINK = re.compile(r"<(https?://[^>|]+)(?:\|[^>]*)?>")
@@ -56,19 +62,54 @@ def user_name(uid):
 
 
 def _et_al(names):
+    names = [n for n in names if n]
     return ", ".join(names[:3]) + (" et al." if len(names) > 3 else "")
 
 
-def crossref_meta(doi):
-    r = requests.get(f"https://api.crossref.org/works/{doi}", timeout=20)
+def _first(x):
+    """CSL fields are sometimes a string, sometimes a list of strings."""
+    return (x[0] if x else "") if isinstance(x, list) else (x or "")
+
+
+def _clean(s):
+    """Strip inline HTML (e.g. <i> in Crossref titles), unescape entities, collapse whitespace."""
+    return " ".join(html.unescape(re.sub(r"<[^>]+>", "", s or "")).split())
+
+
+def doi_meta(doi):
+    """Resolve via doi.org content negotiation: works for Crossref (papers) and DataCite (datasets)."""
+    r = requests.get(f"https://doi.org/{doi}", timeout=20,
+                     headers={"Accept": "application/vnd.citationstyles.csl+json", "User-Agent": UA})
     r.raise_for_status()
-    w = r.json()["message"]
+    w = r.json()
     return {
-        "title": " ".join((w.get("title") or [""])[0].split()),
-        "authors": _et_al([a.get("family", "") for a in w.get("author", [])]),
-        "venue": (w.get("container-title") or [""])[0],
+        "title": _clean(_first(w.get("title"))),
+        "authors": _et_al([a.get("family") or a.get("literal", "") for a in w.get("author", [])]),
+        "venue": _clean(_first(w.get("container-title")) or w.get("publisher", "")),
         "year": str((w.get("issued", {}).get("date-parts") or [[""]])[0][0] or ""),
+        "doi": doi,
     }
+
+
+class _MetaParser(HTMLParser):
+    """Collects <title> and <meta name/property=... content=...> tags (lists, since citation_author repeats)."""
+    def __init__(self):
+        super().__init__()
+        self.meta, self.title, self._in_title = {}, "", False
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        if tag == "meta" and (key := a.get("name") or a.get("property")) and a.get("content"):
+            self.meta.setdefault(key.lower(), []).append(a["content"])
+        self._in_title = tag == "title" and not self.title
+
+    def handle_endtag(self, tag):
+        if tag == "title":
+            self._in_title = False
+
+    def handle_data(self, data):
+        if self._in_title:
+            self.title += data
 
 
 def arxiv_meta(arxiv_id):
@@ -85,30 +126,48 @@ def arxiv_meta(arxiv_id):
     }
 
 
-def page_title(url):
+def page_meta(url):
+    """Scrape the page. Publishers almost all emit Google Scholar `citation_*` meta tags;
+    if there's a DOI we resolve it properly, otherwise use the tags, else title + site name."""
     r = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
-    if t := re.search(r"<title[^>]*>(.*?)</title>", r.text[:200_000], re.S | re.I):
-        return " ".join(html.unescape(t.group(1)).split())[:200]
-    return ""
+    r.raise_for_status()
+    p = _MetaParser()
+    p.feed(r.text[:500_000])
+    m = lambda k: _clean((p.meta.get(k) or [""])[0])
+
+    doi = m("citation_doi") or m("dc.identifier") or m("prism.doi")
+    if d := DOI.search(doi):
+        try:
+            return doi_meta(d.group(1).removeprefix("doi:"))
+        except Exception:
+            pass
+    date = m("citation_publication_date") or m("citation_date") or m("citation_online_date")
+    site = m("og:site_name") or urlparse(url).netloc.removeprefix("www.")
+    return {
+        "title": (m("citation_title") or m("og:title") or _clean(p.title))[:200],
+        "authors": _et_al([_clean(a) for a in p.meta.get("citation_author", [])]),
+        "venue": m("citation_journal_title") or m("citation_conference_title") or site,
+        "year": y.group(0) if (y := re.search(r"\b(19|20)\d\d\b", date)) else "",
+    }
 
 
 def enrich(url):
-    """Best-effort metadata: Crossref for DOIs, arXiv API, else the page <title>.
+    """Best-effort metadata: DOI (Crossref/DataCite via doi.org), arXiv API, else the page itself.
     Each step falls through to the next if it fails; worst case the title is the URL."""
     lookups = []
     if m := DOI.search(url):
-        lookups.append(lambda: crossref_meta(m.group(1)))
+        lookups.append(lambda: doi_meta(m.group(1).rstrip(".,)")))
     if a := ARXIV.search(url):
         lookups.append(lambda: arxiv_meta(a.group(1)))
-    lookups.append(lambda: {"title": page_title(url)})
+    lookups.append(lambda: page_meta(url))
     for lookup in lookups:
         try:
             meta = lookup()
             if meta.get("title"):
-                return meta
+                return {**meta, "meta_version": META_VERSION}
         except Exception:
             pass
-    return {"title": url}
+    return {"title": url, "venue": urlparse(url).netloc.removeprefix("www."), "meta_version": META_VERSION}
 
 
 def paginate(method, **params):
@@ -142,16 +201,29 @@ def clean_text(text):
     return " ".join(text.split())[:300]
 
 
+def _cell(s):
+    """Make text safe inside a Markdown table cell / link label."""
+    return (s or "").replace("|", "\\|").replace("[", "\\[").replace("]", "\\]").replace("<", "&lt;")
+
+
+def _link(e):
+    url = e["url"].replace(" ", "%20").replace("(", "%28").replace(")", "%29").replace("|", "%7C")
+    details = " · ".join(x for x in (e.get("authors"), e.get("venue"), e.get("year")) if x)
+    return f"[{_cell(e['title'])}]({url})" + (f"<br><sub>{_cell(details)}</sub>" if details else "")
+
+
 def render(page, entries):
-    rows = sorted(entries, key=lambda e: e["ts"], reverse=True)
-    lines = [f"# {page.title()}\n", f"_Auto-generated from Slack. {len(rows)} entries. "
+    # One row per Slack message: links shared together are listed in the same cell.
+    by_msg = lambda e: (e["ts"], e["channel"])
+    msgs = [list(g) for _, g in groupby(sorted(entries, key=by_msg, reverse=True), key=by_msg)]
+    lines = [f"# {page.title()}\n", f"_Auto-generated from Slack. {len(entries)} links in {len(msgs)} messages. "
              f"Last updated {datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC._\n",
-             "| Date | Title | Details | Shared by | Note |", "|---|---|---|---|---|"]
-    for e in rows:
-        details = " · ".join(x for x in (e.get("authors"), e.get("venue"), e.get("year")) if x)
-        cell = lambda s: (s or "").replace("|", "\\|")
-        lines.append(f"| {e['date']} | [{cell(e['title'])}]({e['url']}) | {cell(details)} "
-                     f"| {cell(e['user'])} | {'↳ (thread) ' if e.get('in_thread') else ''}{cell(e['note'])} |")
+             "| Date | Link | Shared by | Note |", "|---|---|---|---|"]
+    for group in msgs:
+        e = group[0]
+        links = "<br>".join(_link(x) for x in group)
+        lines.append(f"| {e['date']} | {links} | {_cell(e['user'])} "
+                     f"| {'↳ (thread) ' if e.get('in_thread') else ''}{_cell(e['note'])} |")
     DOCS.mkdir(exist_ok=True)
     (DOCS / f"{page}.md").write_text("\n".join(lines) + "\n")
 
@@ -182,6 +254,18 @@ def archive_channel(channel, page, since, db, seen):
             })
 
 
+def refresh_metadata(entries):
+    """Re-run enrich() once on entries archived by an older enrich(). Only metadata fields
+    change; a failed lookup never replaces a real title with the bare URL."""
+    for e in entries:
+        if e.get("meta_version", 1) >= META_VERSION:
+            continue
+        meta = enrich(e["url"])
+        if meta["title"] == e["url"] and e.get("title") != e["url"]:
+            meta.pop("title")
+        e.update(meta)
+
+
 def main():
     db = json.loads(DATA.read_text()) if DATA.exists() else {"last_run": "0", "entries": []}
     seen = {(e["channel"], e["url"]) for e in db["entries"]}
@@ -194,6 +278,8 @@ def main():
         except Exception as exc:  # e.g. not_in_channel, channel_not_found
             failed.append(channel)
             print(f"::error::channel {channel} ({page}): {exc}")
+
+    refresh_metadata(db["entries"])
 
     # Only advance last_run if every channel succeeded; otherwise the next run
     # re-scans from the old last_run (duplicates are skipped via `seen`).
