@@ -43,6 +43,7 @@ HEADERS = {"Authorization": f"Bearer {TOKEN}"}
 UA = "slack-research-archiver/1.0"
 # Bump when enrich() improves; entries with an older version get their metadata refreshed once.
 META_VERSION = 2
+DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true")
 
 # Slack wraps links as <https://url|label> or <https://url>
 SLACK_LINK = re.compile(r"<(https?://[^>|]+)(?:\|[^>]*)?>")
@@ -54,7 +55,9 @@ def slack(method, **params):
     while True:
         r = requests.get(f"https://slack.com/api/{method}", headers=HEADERS, params=params, timeout=30)
         if r.status_code == 429:  # rate limited
-            time.sleep(int(r.headers.get("Retry-After", 5)))
+            wait = int(r.headers.get("Retry-After", 5))
+            print(f"  rate limited on {method}, retrying in {wait} s")
+            time.sleep(wait)
             continue
         j = r.json()
         if not j.get("ok"):
@@ -210,6 +213,9 @@ def paginate(method, **params):
         j = slack(method, limit=200, **params, **({"cursor": cursor} if cursor else {}))
         msgs += j["messages"]
         cursor = j.get("response_metadata", {}).get("next_cursor")
+        if DEBUG and method == "conversations.history":
+            print(f"  [debug] archive call {params}: {len(j['messages'])} messages, has_more={j.get('has_more')}, "
+                  f"next_cursor={bool(cursor)}, warnings={j.get('response_metadata', {}).get('warnings') or j.get('warning')}")
         if not cursor:
             return msgs
 
@@ -329,6 +335,16 @@ def debug_channel(channel):
         print("  [debug] info:", {k: c.get(k) for k in ("id", "name", "is_member", "is_private", "is_archived", "is_ext_shared")})
     except Exception as exc:
         print(f"  [debug] info failed: {exc}")
+    # Which parameter makes the archive call differ from an unfiltered one?
+    oldest = str(time.time() - 90 * 86400)
+    for label, extra in [("limit=5", {"limit": 5}), ("limit=200", {"limit": 200}),
+                         ("limit=5 + oldest", {"limit": 5, "oldest": oldest}),
+                         ("limit=200 + oldest", {"limit": 200, "oldest": oldest})]:
+        try:
+            j = slack("conversations.history", channel=channel, **extra)
+            print(f"  [debug] probe {label}: {len(j['messages'])} messages, has_more={j.get('has_more')}")
+        except Exception as exc:
+            print(f"  [debug] probe {label} failed: {exc}")
     try:
         j = slack("conversations.history", channel=channel, limit=5)  # no `oldest`: newest 5, any age
         print(f"  [debug] history: {len(j['messages'])} messages, has_more={j.get('has_more')}, "
@@ -375,7 +391,7 @@ def main():
         try:
             stats = archive_channel(channel, page, since, db, seen)
             print(f"{channel} {channel_name(channel)} -> {page}: {stats}")
-            if os.environ.get("DEBUG", "").lower() in ("1", "true"):
+            if DEBUG:
                 debug_channel(channel)
         except Exception as exc:  # e.g. not_in_channel, channel_not_found
             failed.append(channel)
