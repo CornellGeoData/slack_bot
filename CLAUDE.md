@@ -38,6 +38,7 @@ Never commit tokens. Use a `.env` file and keep it in `.gitignore`.
 
 - **The 90-day limit is permanent:** the API can't return messages older than 90 days on the free plan. Never delete or rebuild `data/archive.json` from scratch, because older entries can't be recovered.
 - **Free plan app limit:** a free workspace can have at most 10 apps. New features should go into this same Slack app with the same token, not a new app.
+- **Don't pass `oldest` to `conversations.history`:** in our workspace it returned no messages for one channel even though they were hours old. `history_since()` pages newest-first and stops at the 90-day cutoff itself.
 - **Rate limits:** `slack()` retries when Slack returns HTTP 429. Keep all Slack calls going through it.
 - **Data format:** if you change the fields in `archive.json`, make the code accept entries that don't have the new fields (use `e.get(...)`). Existing entries are never rebuilt.
 - **Dependencies:** keep them light. Right now the only one is `requests`.

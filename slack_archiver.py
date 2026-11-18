@@ -213,11 +213,29 @@ def paginate(method, **params):
         j = slack(method, limit=200, **params, **({"cursor": cursor} if cursor else {}))
         msgs += j["messages"]
         cursor = j.get("response_metadata", {}).get("next_cursor")
-        if DEBUG and method == "conversations.history":
-            print(f"  [debug] archive call {params}: {len(j['messages'])} messages, has_more={j.get('has_more')}, "
-                  f"next_cursor={bool(cursor)}, warnings={j.get('response_metadata', {}).get('warnings') or j.get('warning')}")
         if not cursor:
             return msgs
+
+
+def history_since(channel, window_start):
+    """Top-level messages newer than `window_start`, newest first.
+    Deliberately does NOT pass `oldest` to Slack: on our free-plan workspace,
+    conversations.history with `oldest` returned nothing for one channel even though
+    its messages were hours old. Without it Slack pages newest-first, so we stop as
+    soon as we reach a message older than the window."""
+    cursor = None
+    while True:
+        j = slack("conversations.history", channel=channel, limit=200, **({"cursor": cursor} if cursor else {}))
+        cursor = j.get("response_metadata", {}).get("next_cursor")
+        if DEBUG:
+            print(f"  [debug] archive call: {len(j['messages'])} messages, has_more={j.get('has_more')}, "
+                  f"next_cursor={bool(cursor)}, warnings={j.get('response_metadata', {}).get('warnings') or j.get('warning')}")
+        for m in j["messages"]:
+            if float(m["ts"]) < window_start:
+                return
+            yield m
+        if not cursor:
+            return
 
 
 def fetch_new(channel, since, stats):
@@ -225,8 +243,7 @@ def fetch_new(channel, since, stats):
     including new replies in older threads."""
     # Scan the whole visible window (90 days) so threads that get new replies
     # long after the parent message was posted are still caught.
-    window_start = str(time.time() - 90 * 86400)
-    for parent in paginate("conversations.history", channel=channel, oldest=window_start):
+    for parent in history_since(channel, time.time() - 90 * 86400):
         stats["in_window"] += 1
         if float(parent["ts"]) > float(since):
             yield parent, False
@@ -385,7 +402,7 @@ def main():
     # link detection). Safe: links already archived are skipped via `seen`.
     since = "0" if os.environ.get("RESCAN", "").lower() in ("1", "true") else db["last_run"]
 
-    print(f"Scanning messages after {since} ({'RESCAN: full 90-day window' if since == '0' else 'since last_run'})")
+    print(f"Scanning messages after {since} ({'full 90-day window' if since == '0' else 'since last_run'})")
     failed = []
     for channel, page in CHANNELS.items():
         try:
