@@ -1,5 +1,5 @@
 {
- "last_run": "1794984014.5093827",
+ "last_run": "1794984450.6115992",
  "entries": [
   {
    "channel": "C0CJRSZ0420",
@@ -23,7 +23,7 @@
    "ts": "1794954882.257449",
    "date": "2026-11-17",
    "user": "Avinash Aravind",
-   "note": "This company Zeus AI is making AI/ML weather models, they came out with this cool new weather world model yesterday that takes in raw observational data and creates a constant state of the atmosphere based on how all those observational instruments would see it. Cool stuff I think! Their blog post: ",
+   "note": "This company Zeus AI is making AI/ML weather models, they came out with this cool new weather world model yesterday that takes in raw observational data and creates a constant state of the atmosphere based on how all those observational instruments would see it. Cool stuff I think! Their blog post: Arxiv paper:",
    "in_thread": false,
    "title": "Introducing WeatherDreamer: A World Model for the Weather",
    "authors": "",
@@ -38,7 +38,7 @@
    "ts": "1794954882.257449",
    "date": "2026-11-17",
    "user": "Avinash Aravind",
-   "note": "This company Zeus AI is making AI/ML weather models, they came out with this cool new weather world model yesterday that takes in raw observational data and creates a constant state of the atmosphere based on how all those observational instruments would see it. Cool stuff I think! Their blog post: ",
+   "note": "This company Zeus AI is making AI/ML weather models, they came out with this cool new weather world model yesterday that takes in raw observational data and creates a constant state of the atmosphere based on how all those observational instruments would see it. Cool stuff I think! Their blog post: Arxiv paper:",
    "in_thread": false,
    "title": "WeatherDreamer: Learning a World Model from Multimodal Earth Observations",
    "authors": "Duffy, Penn, Ballard et al.",
@@ -81,7 +81,7 @@
    "ts": "1794955180.583669",
    "date": "2026-11-17",
    "user": "Avinash Aravind",
-   "note": "A whole archive of cloud-optimized weather forecasts going back many years. Most of them are \u201cvirtual\u201d which are annoying for anything other than making maps and maybe some spatial modeling, but the few that are not virtual are time-series optimized and could be interesting to throw one of those zer",
+   "note": "A whole archive of cloud-optimized weather forecasts going back many years. Most of them are \u201cvirtual\u201d which are annoying for anything other than making maps and maybe some spatial modeling, but the few that are not virtual are time-series optimized and could be interesting to throw one of those zero-shot time series model at",
    "in_thread": false,
    "title": "Cloud-optimized weather & climate data",
    "authors": "",
