@@ -6,9 +6,11 @@ Env vars:
                     plus groups:history/groups:read if the channels are private)
   CHANNELS          e.g. "C0123PAPERS:papers,C0456DATA:resources"  (channel_id:page_name)
 """
+import html
 import json
 import os
 import re
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,7 +18,10 @@ from pathlib import Path
 import requests
 
 TOKEN = os.environ["SLACK_BOT_TOKEN"]
-CHANNELS = dict(c.split(":") for c in os.environ["CHANNELS"].split(","))
+CHANNELS = dict(
+    (cid.strip(), page.strip())
+    for cid, page in (c.split(":", 1) for c in os.environ["CHANNELS"].split(",") if c.strip())
+)
 DATA = Path("data/archive.json")
 DOCS = Path("docs")
 HEADERS = {"Authorization": f"Bearer {TOKEN}"}
@@ -44,44 +49,66 @@ def user_name(uid):
     if uid and uid not in _users:
         try:
             u = slack("users.info", user=uid)["user"]
-            _users[uid] = u["profile"].get("display_name") or u["real_name"]
-        except RuntimeError:
+            _users[uid] = u.get("profile", {}).get("display_name") or u.get("real_name") or u.get("name") or uid
+        except (RuntimeError, KeyError):
             _users[uid] = uid
     return _users.get(uid, "unknown")
 
 
+def _et_al(names):
+    return ", ".join(names[:3]) + (" et al." if len(names) > 3 else "")
+
+
+def crossref_meta(doi):
+    r = requests.get(f"https://api.crossref.org/works/{doi}", timeout=20)
+    r.raise_for_status()
+    w = r.json()["message"]
+    return {
+        "title": " ".join((w.get("title") or [""])[0].split()),
+        "authors": _et_al([a.get("family", "") for a in w.get("author", [])]),
+        "venue": (w.get("container-title") or [""])[0],
+        "year": str((w.get("issued", {}).get("date-parts") or [[""]])[0][0] or ""),
+    }
+
+
+def arxiv_meta(arxiv_id):
+    r = requests.get(f"https://export.arxiv.org/api/query?id_list={arxiv_id}", timeout=20)
+    r.raise_for_status()
+    entry = r.text.split("<entry>", 1)[1]  # IndexError if no entry -> caller falls back
+    title = re.search(r"<title>(.*?)</title>", entry, re.S)
+    year = re.search(r"<published>(\d{4})", entry)
+    return {
+        "title": " ".join(title.group(1).split()) if title else "",
+        "authors": _et_al(re.findall(r"<name>(.*?)</name>", entry)),
+        "venue": "arXiv",
+        "year": year.group(1) if year else "",
+    }
+
+
+def page_title(url):
+    r = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
+    if t := re.search(r"<title[^>]*>(.*?)</title>", r.text[:200_000], re.S | re.I):
+        return " ".join(html.unescape(t.group(1)).split())[:200]
+    return ""
+
+
 def enrich(url):
-    """Best-effort metadata: Crossref for DOIs, arXiv API, else the page <title>."""
-    meta = {"title": url}
-    try:
-        if m := DOI.search(url):
-            w = requests.get(f"https://api.crossref.org/works/{m.group(1)}", timeout=20).json()["message"]
-            authors = [a.get("family", "") for a in w.get("author", [])]
-            meta = {
-                "title": (w.get("title") or [url])[0],
-                "authors": ", ".join(authors[:3]) + (" et al." if len(authors) > 3 else ""),
-                "venue": (w.get("container-title") or [""])[0],
-                "year": str((w.get("issued", {}).get("date-parts") or [[""]])[0][0]),
-            }
-        elif m := ARXIV.search(url):
-            xml = requests.get(f"https://export.arxiv.org/api/query?id_list={m.group(1)}", timeout=20).text
-            entry = xml.split("<entry>", 1)[-1]
-            title = re.search(r"<title>(.*?)</title>", entry, re.S)
-            names = re.findall(r"<name>(.*?)</name>", entry)
-            year = re.search(r"<published>(\d{4})", entry)
-            meta = {
-                "title": " ".join(title.group(1).split()) if title else url,
-                "authors": ", ".join(names[:3]) + (" et al." if len(names) > 3 else ""),
-                "venue": "arXiv",
-                "year": year.group(1) if year else "",
-            }
-        else:
-            html = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0"}).text[:200_000]
-            if t := re.search(r"<title[^>]*>(.*?)</title>", html, re.S | re.I):
-                meta["title"] = " ".join(t.group(1).split())[:200]
-    except Exception:
-        pass
-    return meta
+    """Best-effort metadata: Crossref for DOIs, arXiv API, else the page <title>.
+    Each step falls through to the next if it fails; worst case the title is the URL."""
+    lookups = []
+    if m := DOI.search(url):
+        lookups.append(lambda: crossref_meta(m.group(1)))
+    if a := ARXIV.search(url):
+        lookups.append(lambda: arxiv_meta(a.group(1)))
+    lookups.append(lambda: {"title": page_title(url)})
+    for lookup in lookups:
+        try:
+            meta = lookup()
+            if meta.get("title"):
+                return meta
+        except Exception:
+            pass
+    return {"title": url}
 
 
 def paginate(method, **params):
@@ -129,35 +156,60 @@ def render(page, entries):
     (DOCS / f"{page}.md").write_text("\n".join(lines) + "\n")
 
 
+def render_index(counts):
+    lines = ["# Research Link Archive\n", "Links shared in our Slack research channels.\n"]
+    lines += [f"- [{page.title()}]({page}.md) ({n} entries)" for page, n in sorted(counts.items())]
+    DOCS.mkdir(exist_ok=True)
+    (DOCS / "index.md").write_text("\n".join(lines) + "\n")
+
+
+def archive_channel(channel, page, since, db, seen):
+    for msg, in_thread in fetch_new(channel, since):
+        if msg.get("subtype") in ("channel_join", "bot_message"):
+            continue
+        # Messages without links (i.e. discussion) are skipped automatically.
+        # Slack escapes &, <, > in message text, so unescape the URL.
+        for url in dict.fromkeys(html.unescape(u) for u in SLACK_LINK.findall(msg.get("text", ""))):
+            if (channel, url) in seen:
+                continue
+            seen.add((channel, url))
+            db["entries"].append({
+                "channel": channel, "page": page, "url": url, "ts": msg["ts"],
+                "date": datetime.fromtimestamp(float(msg["ts"]), timezone.utc).strftime("%Y-%m-%d"),
+                "user": user_name(msg.get("user")), "note": clean_text(msg.get("text", "")),
+                "in_thread": in_thread,
+                **enrich(url),
+            })
+
+
 def main():
     db = json.loads(DATA.read_text()) if DATA.exists() else {"last_run": "0", "entries": []}
     seen = {(e["channel"], e["url"]) for e in db["entries"]}
     run_started = str(time.time())
 
+    failed = []
     for channel, page in CHANNELS.items():
-        for msg, in_thread in fetch_new(channel, db["last_run"]):
-            if msg.get("subtype") in ("channel_join", "bot_message"):
-                continue
-            # Messages without links (i.e. discussion) are skipped automatically.
-            for url in dict.fromkeys(SLACK_LINK.findall(msg.get("text", ""))):
-                if (channel, url) in seen:
-                    continue
-                seen.add((channel, url))
-                db["entries"].append({
-                    "channel": channel, "page": page, "url": url, "ts": msg["ts"],
-                    "date": datetime.fromtimestamp(float(msg["ts"]), timezone.utc).strftime("%Y-%m-%d"),
-                    "user": user_name(msg.get("user")), "note": clean_text(msg.get("text", "")),
-                    "in_thread": in_thread,
-                    **enrich(url),
-                })
-    db["last_run"] = run_started
+        try:
+            archive_channel(channel, page, db["last_run"], db, seen)
+        except Exception as exc:  # e.g. not_in_channel, channel_not_found
+            failed.append(channel)
+            print(f"::error::channel {channel} ({page}): {exc}")
 
-    for page in set(CHANNELS.values()):
+    # Only advance last_run if every channel succeeded; otherwise the next run
+    # re-scans from the old last_run (duplicates are skipped via `seen`).
+    if not failed:
+        db["last_run"] = run_started
+
+    pages = {e["page"] for e in db["entries"]} | set(CHANNELS.values())
+    for page in pages:
         render(page, [e for e in db["entries"] if e["page"] == page])
+    render_index({p: sum(e["page"] == p for e in db["entries"]) for p in pages})
 
     DATA.parent.mkdir(exist_ok=True)
     DATA.write_text(json.dumps(db, indent=1))
     print(f"{len(db['entries'])} total entries archived")
+    if failed:
+        sys.exit(1)  # makes the workflow run show as failed (GitHub emails on failure)
 
 
 if __name__ == "__main__":
