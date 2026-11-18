@@ -256,7 +256,7 @@ def fetch_new(channel, since, stats):
 def clean_text(text):
     text = SLACK_LINK.sub("", text)
     text = re.sub(r"<@(\w+)>", lambda m: "@" + user_name(m.group(1)), text)
-    return " ".join(text.split())[:300]
+    return " ".join(text.split())
 
 
 def _cell(s):
@@ -276,7 +276,7 @@ def render(page, entries):
     msgs = [list(g) for _, g in groupby(sorted(entries, key=by_msg, reverse=True), key=by_msg)]
     lines = [f"# {page.title()}\n", f"_Auto-generated from Slack. {len(entries)} links in {len(msgs)} messages. "
              f"Last updated {datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC._\n",
-             "| Date | Link | Shared by | Note |", "|---|---|---|---|"]
+             "| Date | Link | Shared&nbsp;by | Note |", "|---|---|---|---|"]
     for group in msgs:
         e = group[0]
         links = "<br>".join(_link(x) for x in group)
@@ -317,7 +317,8 @@ def message_content(msg):
 
 def archive_channel(channel, page, since, db, seen):
     # in_window: top-level messages visible in the last 90 days; new: messages/replies after `since`
-    stats = {"in_window": 0, "new": 0, "with_links": 0, "added": 0, "skipped_subtypes": {}, "file_only": 0}
+    stats = {"in_window": 0, "new": 0, "with_links": 0, "added": 0, "notes_updated": 0,
+             "skipped_subtypes": {}, "file_only": 0}
     for msg, in_thread in fetch_new(channel, since, stats):
         stats["new"] += 1
         if (sub := msg.get("subtype")) in ("channel_join", "bot_message"):
@@ -328,18 +329,23 @@ def archive_channel(channel, page, since, db, seen):
             stats["file_only"] += 1  # uploaded files: nothing permanent to link to
         stats["with_links"] += bool(urls)
         # Messages without links (i.e. discussion) are skipped automatically.
+        note = clean_text(text)
         for url in urls:
-            if (channel, url) in seen:
+            if (e := seen.get((channel, url))) is not None:
+                # Same message seen again (rescan, or edited): keep its note current.
+                if e["ts"] == msg["ts"] and e.get("note") != note:
+                    e["note"] = note
+                    stats["notes_updated"] += 1
                 continue
-            seen.add((channel, url))
             stats["added"] += 1
-            db["entries"].append({
+            seen[(channel, url)] = e = {
                 "channel": channel, "page": page, "url": url, "ts": msg["ts"],
                 "date": datetime.fromtimestamp(float(msg["ts"]), timezone.utc).strftime("%Y-%m-%d"),
-                "user": user_name(msg.get("user")), "note": clean_text(text),
+                "user": user_name(msg.get("user")), "note": note,
                 "in_thread": in_thread,
                 **enrich(url),
-            })
+            }
+            db["entries"].append(e)
     return stats
 
 
@@ -395,7 +401,7 @@ def refresh_metadata(entries):
 
 def main():
     db = json.loads(DATA.read_text()) if DATA.exists() else {"last_run": "0", "entries": []}
-    seen = {(e["channel"], e["url"]) for e in db["entries"]}
+    seen = {(e["channel"], e["url"]): e for e in db["entries"]}  # dedup key -> entry
     run_started = str(time.time())
 
     # RESCAN=1 ignores last_run and re-reads the whole 90-day window (e.g. after improving
