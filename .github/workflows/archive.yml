@@ -3,6 +3,11 @@ on:
   schedule:
     - cron: "17 6 * * *"   # daily, 06:17 UTC
   workflow_dispatch:        # "Run workflow" button for manual runs
+    inputs:
+      rescan:
+        description: "Re-read the whole 90-day window, ignoring last_run"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -20,6 +25,7 @@ jobs:
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           CHANNELS: ${{ vars.CHANNELS }}
+          RESCAN: ${{ inputs.rescan }}
       - name: Commit changes
         if: ${{ !cancelled() }}   # still save healthy channels if one channel failed
         run: |

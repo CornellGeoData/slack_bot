@@ -8,10 +8,12 @@ A Slack bot for a student earth science / engineering research team. Our workspa
 - It reads the channels listed in `CHANNELS`: parent messages with `conversations.history`, thread replies with `conversations.replies`.
 - Each run looks back over the whole 90-day window, so new replies in old threads are still found. `last_run` in the data file decides what counts as new.
 - Only messages that contain links are archived. Discussion that's only text is skipped. Duplicates are found by the pair `(channel, url)`.
-- Metadata lookups: Crossref for DOIs, the arXiv API for arXiv IDs, and the page `<title>` for anything else.
+- Metadata lookups: doi.org content negotiation for DOIs (covers Crossref papers and DataCite datasets), the arXiv API for arXiv IDs (rate-limited: 3 s spacing + retries), and otherwise the page's `citation_*` meta tags (or its DOI), falling back to `<title>` + site name. Bump `META_VERSION` when lookups improve; older entries get their metadata refreshed once.
+- Links are read from message text, forwarded/shared message attachments, and Block Kit `link` elements.
+- Each run logs a per-channel summary (messages seen, with links, added, skipped subtypes). Run the workflow manually with **rescan** to ignore `last_run` and re-read the whole 90-day window.
 - Output:
   - `data/archive.json` is the source of truth: every entry, plus `last_run`.
-  - `docs/<page>.md` is a Markdown table for each channel, newest first, served by GitHub Pages from `docs/`.
+  - `docs/<page>.md` is a Markdown table for each channel, newest first, one row per Slack message (its links grouped in one cell), served by GitHub Pages from `docs/`. `docs/index.md` links the pages.
 - The workflow commits changes to `data/` and `docs/` back to the repo.
 
 ## Configuration

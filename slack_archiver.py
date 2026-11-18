@@ -66,6 +66,12 @@ def _et_al(names):
     return ", ".join(names[:3]) + (" et al." if len(names) > 3 else "")
 
 
+def _family(name):
+    """'Duffy, Kate' or 'Kate Duffy' -> 'Duffy' (matches the family names Crossref gives)."""
+    name = _clean(name)
+    return name.split(",")[0].strip() if "," in name else (name.split() or [""])[-1]
+
+
 def _first(x):
     """CSL fields are sometimes a string, sometimes a list of strings."""
     return (x[0] if x else "") if isinstance(x, list) else (x or "")
@@ -112,15 +118,29 @@ class _MetaParser(HTMLParser):
             self.title += data
 
 
-def arxiv_meta(arxiv_id):
-    r = requests.get(f"https://export.arxiv.org/api/query?id_list={arxiv_id}", timeout=20)
+_arxiv_last = 0.0
+def _arxiv_get(url, tries=4):
+    """arXiv asks for >= 3 s between API calls and 429s shared IPs (like Actions runners) readily."""
+    global _arxiv_last
+    for attempt in range(tries):
+        time.sleep(max(0, _arxiv_last + 3 - time.time()))
+        _arxiv_last = time.time()
+        r = requests.get(url, timeout=20, headers={"User-Agent": UA})
+        if r.status_code not in (429, 503):
+            break
+        time.sleep(int(r.headers.get("Retry-After", 0)) or 5 * (attempt + 1))
     r.raise_for_status()
+    return r
+
+
+def arxiv_meta(arxiv_id):
+    r = _arxiv_get(f"https://export.arxiv.org/api/query?id_list={arxiv_id}")
     entry = r.text.split("<entry>", 1)[1]  # IndexError if no entry -> caller falls back
     title = re.search(r"<title>(.*?)</title>", entry, re.S)
     year = re.search(r"<published>(\d{4})", entry)
     return {
         "title": " ".join(title.group(1).split()) if title else "",
-        "authors": _et_al(re.findall(r"<name>(.*?)</name>", entry)),
+        "authors": _et_al([_family(n) for n in re.findall(r"<name>(.*?)</name>", entry)]),
         "venue": "arXiv",
         "year": year.group(1) if year else "",
     }
@@ -145,7 +165,7 @@ def page_meta(url):
     site = m("og:site_name") or urlparse(url).netloc.removeprefix("www.")
     return {
         "title": (m("citation_title") or m("og:title") or _clean(p.title))[:200],
-        "authors": _et_al([_clean(a) for a in p.meta.get("citation_author", [])]),
+        "authors": _et_al([_family(a) for a in p.meta.get("citation_author", [])]),
         "venue": m("citation_journal_title") or m("citation_conference_title") or site,
         "year": y.group(0) if (y := re.search(r"\b(19|20)\d\d\b", date)) else "",
     }
@@ -159,6 +179,8 @@ def enrich(url):
         lookups.append(lambda: doi_meta(m.group(1).rstrip(".,)")))
     if a := ARXIV.search(url):
         lookups.append(lambda: arxiv_meta(a.group(1)))
+        # The abs page has citation_* tags; scraping a /pdf/ link would find no title at all.
+        lookups.append(lambda: page_meta(f"https://arxiv.org/abs/{a.group(1)}"))
     lookups.append(lambda: page_meta(url))
     for lookup in lookups:
         try:
@@ -235,23 +257,60 @@ def render_index(counts):
     (DOCS / "index.md").write_text("\n".join(lines) + "\n")
 
 
+def _block_links(node):
+    """Recursively find {"type": "link", "url": ...} elements in Block Kit rich_text blocks."""
+    if isinstance(node, dict):
+        if node.get("type") == "link" and node.get("url"):
+            yield node["url"]
+        for v in node.values():
+            yield from _block_links(v)
+    elif isinstance(node, list):
+        for v in node:
+            yield from _block_links(v)
+
+
+def message_content(msg):
+    """(text, urls) for a message. Forwarded/shared messages keep their content in
+    `attachments` (with empty top-level text); app-posted messages may only have blocks."""
+    texts = [msg.get("text", "")]
+    texts += [a.get("text", "") for a in msg.get("attachments", []) if a.get("is_share") or a.get("is_msg_unfurl")]
+    urls = [u for t in texts for u in SLACK_LINK.findall(t)] + list(_block_links(msg.get("blocks", [])))
+    # Slack escapes &, <, > in message text, so unescape the URL.
+    return " ".join(t for t in texts if t), list(dict.fromkeys(html.unescape(u) for u in urls))
+
+
 def archive_channel(channel, page, since, db, seen):
+    stats = {"messages": 0, "with_links": 0, "added": 0, "skipped_subtypes": {}, "file_only": 0}
     for msg, in_thread in fetch_new(channel, since):
-        if msg.get("subtype") in ("channel_join", "bot_message"):
+        stats["messages"] += 1
+        if (sub := msg.get("subtype")) in ("channel_join", "bot_message"):
+            stats["skipped_subtypes"][sub] = stats["skipped_subtypes"].get(sub, 0) + 1
             continue
+        text, urls = message_content(msg)
+        if not urls and msg.get("files"):
+            stats["file_only"] += 1  # uploaded files: nothing permanent to link to
+        stats["with_links"] += bool(urls)
         # Messages without links (i.e. discussion) are skipped automatically.
-        # Slack escapes &, <, > in message text, so unescape the URL.
-        for url in dict.fromkeys(html.unescape(u) for u in SLACK_LINK.findall(msg.get("text", ""))):
+        for url in urls:
             if (channel, url) in seen:
                 continue
             seen.add((channel, url))
+            stats["added"] += 1
             db["entries"].append({
                 "channel": channel, "page": page, "url": url, "ts": msg["ts"],
                 "date": datetime.fromtimestamp(float(msg["ts"]), timezone.utc).strftime("%Y-%m-%d"),
-                "user": user_name(msg.get("user")), "note": clean_text(msg.get("text", "")),
+                "user": user_name(msg.get("user")), "note": clean_text(text),
                 "in_thread": in_thread,
                 **enrich(url),
             })
+    return stats
+
+
+def channel_name(channel):
+    try:
+        return "#" + slack("conversations.info", channel=channel)["channel"]["name"]
+    except Exception:
+        return "?"
 
 
 def refresh_metadata(entries):
@@ -271,10 +330,15 @@ def main():
     seen = {(e["channel"], e["url"]) for e in db["entries"]}
     run_started = str(time.time())
 
+    # RESCAN=1 ignores last_run and re-reads the whole 90-day window (e.g. after improving
+    # link detection). Safe: links already archived are skipped via `seen`.
+    since = "0" if os.environ.get("RESCAN", "").lower() in ("1", "true") else db["last_run"]
+
     failed = []
     for channel, page in CHANNELS.items():
         try:
-            archive_channel(channel, page, db["last_run"], db, seen)
+            stats = archive_channel(channel, page, since, db, seen)
+            print(f"{channel} {channel_name(channel)} -> {page}: {stats}")
         except Exception as exc:  # e.g. not_in_channel, channel_not_found
             failed.append(channel)
             print(f"::error::channel {channel} ({page}): {exc}")
