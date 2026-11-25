@@ -238,19 +238,36 @@ def history_since(channel, window_start):
             return
 
 
-def fetch_new(channel, since, stats):
-    """Yield (message, is_thread_reply) for everything posted after `since`,
-    including new replies in older threads."""
+def conversation_streams(channel, since, stats):
+    """Yield (messages oldest-first, is_thread) for the channel's top level and for every
+    thread with replies after `since`. Kept as whole streams (not just new messages) so a
+    link's follow-up notes can be found by looking at the messages right after it."""
     # Scan the whole visible window (90 days) so threads that get new replies
     # long after the parent message was posted are still caught.
-    for parent in history_since(channel, time.time() - 90 * 86400):
-        stats["in_window"] += 1
-        if float(parent["ts"]) > float(since):
-            yield parent, False
+    parents = list(history_since(channel, time.time() - 90 * 86400))
+    stats["in_window"] = len(parents)
+    yield parents[::-1], False
+    for parent in parents:
         if parent.get("reply_count") and float(parent.get("latest_reply", 0)) > float(since):
-            for reply in paginate("conversations.replies", channel=channel, ts=parent["ts"])[1:]:
-                if float(reply["ts"]) > float(since):
-                    yield reply, True
+            replies = paginate("conversations.replies", channel=channel, ts=parent["ts"])[1:]
+            yield sorted(replies, key=lambda m: float(m["ts"])), True
+
+
+FOLLOW_UP_WINDOW = 5 * 60  # seconds after a link message
+
+
+def follow_ups(stream, i):
+    """Messages right after stream[i] by the same author, within FOLLOW_UP_WINDOW of it,
+    with nobody else posting in between. Stops at the author's next link message
+    (its text is that link's own note)."""
+    msg, out = stream[i], []
+    for m in stream[i + 1:]:
+        if float(m["ts"]) - float(msg["ts"]) > FOLLOW_UP_WINDOW or m.get("user") != msg.get("user"):
+            break
+        if m.get("subtype") in SKIP_SUBTYPES or message_content(m)[1]:
+            break
+        out.append(m)
+    return out
 
 
 def clean_text(text):
@@ -281,7 +298,7 @@ def render(page, entries):
         e = group[0]
         links = "<br>".join(_link(x) for x in group)
         lines.append(f"| {e['date']} | {links} | {_cell(e['user'])} "
-                     f"| {'↳ (thread) ' if e.get('in_thread') else ''}{_cell(e['note'])} |")
+                     f"| {'↳ (thread) ' if e.get('in_thread') else ''}{_cell(e['note']).replace(chr(10), '<br>')} |")
     DOCS.mkdir(exist_ok=True)
     (DOCS / f"{page}.md").write_text("\n".join(lines) + "\n")
 
@@ -315,38 +332,54 @@ def message_content(msg):
     return " ".join(t for t in texts if t), list(dict.fromkeys(html.unescape(u) for u in urls))
 
 
+SKIP_SUBTYPES = ("channel_join", "bot_message")
+
+
 def archive_channel(channel, page, since, db, seen):
     # in_window: top-level messages visible in the last 90 days; new: messages/replies after `since`
     stats = {"in_window": 0, "new": 0, "with_links": 0, "added": 0, "notes_updated": 0,
-             "skipped_subtypes": {}, "file_only": 0}
-    for msg, in_thread in fetch_new(channel, since, stats):
-        stats["new"] += 1
-        if (sub := msg.get("subtype")) in ("channel_join", "bot_message"):
-            stats["skipped_subtypes"][sub] = stats["skipped_subtypes"].get(sub, 0) + 1
-            continue
-        text, urls = message_content(msg)
-        if not urls and msg.get("files"):
-            stats["file_only"] += 1  # uploaded files: nothing permanent to link to
-        stats["with_links"] += bool(urls)
-        # Messages without links (i.e. discussion) are skipped automatically.
-        note = clean_text(text)
-        for url in urls:
-            if (e := seen.get((channel, url))) is not None:
-                # Same message seen again (rescan, or edited): keep its note current.
-                if e["ts"] == msg["ts"] and e.get("note") != note:
-                    e["note"] = note
-                    stats["notes_updated"] += 1
+             "follow_up_notes": 0, "skipped_subtypes": {}, "file_only": 0}
+    for stream, in_thread in conversation_streams(channel, since, stats):
+        for i, msg in enumerate(stream):
+            is_new = float(msg["ts"]) > float(since)
+            stats["new"] += is_new
+            if (sub := msg.get("subtype")) in SKIP_SUBTYPES:
+                if is_new:
+                    stats["skipped_subtypes"][sub] = stats["skipped_subtypes"].get(sub, 0) + 1
                 continue
-            stats["added"] += 1
-            seen[(channel, url)] = e = {
-                "channel": channel, "page": page, "url": url, "ts": msg["ts"],
-                "date": datetime.fromtimestamp(float(msg["ts"]), timezone.utc).strftime("%Y-%m-%d"),
-                "user": user_name(msg.get("user")), "note": note,
-                "in_thread": in_thread,
-                **enrich(url),
-            }
-            db["entries"].append(e)
+            text, urls = message_content(msg)
+            if not urls:
+                # Discussion without links is skipped (it may still be a follow-up note).
+                stats["file_only"] += is_new and bool(msg.get("files"))  # nothing permanent to link to
+                continue
+            extra = follow_ups(stream, i)
+            # Reprocess a link message if it, or a follow-up note to it, is new.
+            if not is_new and not any(float(m["ts"]) > float(since) for m in extra):
+                continue
+            stats["with_links"] += 1
+            stats["follow_up_notes"] += len(extra)
+            parts = [clean_text(t) for t in [text] + [message_content(m)[0] for m in extra]]
+            archive_links(msg, urls, "\n".join(p for p in parts if p), in_thread, channel, page, db, seen, stats)
     return stats
+
+
+def archive_links(msg, urls, note, in_thread, channel, page, db, seen, stats):
+    for url in urls:
+        if (e := seen.get((channel, url))) is not None:
+            # Same message seen again (rescan, edit, late follow-up): keep its note current.
+            if e["ts"] == msg["ts"] and e.get("note") != note:
+                e["note"] = note
+                stats["notes_updated"] += 1
+            continue
+        stats["added"] += 1
+        seen[(channel, url)] = e = {
+            "channel": channel, "page": page, "url": url, "ts": msg["ts"],
+            "date": datetime.fromtimestamp(float(msg["ts"]), timezone.utc).strftime("%Y-%m-%d"),
+            "user": user_name(msg.get("user")), "note": note,
+            "in_thread": in_thread,
+            **enrich(url),
+        }
+        db["entries"].append(e)
 
 
 def debug_channel(channel):
