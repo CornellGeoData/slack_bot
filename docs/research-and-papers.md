@@ -1,9 +1,10 @@
 # Research-And-Papers
 
-_Auto-generated from Slack. 7 links in 6 messages. Last updated 2026-11-26 16:51 UTC._
+_Auto-generated from Slack. 8 links in 7 messages. Last updated 2026-11-27 16:37 UTC._
 
 | Date | Link | Shared&nbsp;by | Note |
 |---|---|---|---|
+| 2026-11-27 | [Cogentic: Multi-Agent Orchestration for Automated Proof Discovery](https://arxiv.org/abs/2609.40324)<br><sub>Cai, Gupta, Jiang et al. · arXiv · 2026</sub> | hendry | WE are proving pnp wit hthis |
 | 2026-11-26 | [Global lake synchrony signals rising planetary-scale ecological coupling](https://doi.org/10.1073/pnas.2611874123)<br><sub>Zhang, Han, Gillson et al. · Proceedings of the National Academy of Sciences · 2026</sub> | Xingjian Mu | This paper is really interesting—they talk about how lakes around the world are becoming more and more similar under anthropogenic stressors. They used satellite derived chlorophyll a, water transparency, and sedimentary record, which I think could be of interest to us. |
 | 2026-11-25 | [Reinforcement Learning from Human Feedback](https://rlhfbook.com/)<br><sub>Lambert · RLHF Book · 2025</sub> | hendry | on a serious note the rlhfbook from the same guy is good if you dont like watching youtube: |
 | 2026-11-25 | [https://youtu.be/o6l6tJQgUg4?is=znlx-XQ8fbsG9QT3](https://youtu.be/o6l6tJQgUg4?is=znlx-XQ8fbsG9QT3)<br><sub>youtu.be</sub> | Orion Hoch | If you are interested in ML work and don't know where to start I recommend this guys channel. His videos are a good length for me where they cover the breadth of a topic well and get me interested in parts of ML training I don't think about while giving good intro info to start. Highly recommend!<br>He does a heavy focus on RL since that's his speciality but imo I think RL is a good way of viewing ML problems since the general solution pipeline can be comparable to other ML processes |

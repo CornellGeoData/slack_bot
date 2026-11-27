@@ -1,5 +1,5 @@
 {
- "last_run": "1795711890.1447668",
+ "last_run": "1795797451.9292564",
  "entries": [
   {
    "channel": "C0CJRSZ0420",
@@ -176,6 +176,21 @@
    "venue": "Proceedings of the National Academy of Sciences",
    "year": "2026",
    "doi": "10.1073/pnas.2611874123",
+   "meta_version": 2
+  },
+  {
+   "channel": "C0CJRSZ0420",
+   "page": "research-and-papers",
+   "url": "https://arxiv.org/abs/2609.40324",
+   "ts": "1795789633.022039",
+   "date": "2026-11-27",
+   "user": "hendry",
+   "note": "WE are proving pnp wit hthis",
+   "in_thread": false,
+   "title": "Cogentic: Multi-Agent Orchestration for Automated Proof Discovery",
+   "authors": "Cai, Gupta, Jiang et al.",
+   "venue": "arXiv",
+   "year": "2026",
    "meta_version": 2
   }
  ]
