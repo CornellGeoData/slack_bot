@@ -1,9 +1,10 @@
 # Research-And-Papers
 
-_Auto-generated from Slack. 8 links in 7 messages. Last updated 2026-11-27 16:37 UTC._
+_Auto-generated from Slack. 9 links in 8 messages. Last updated 2026-11-28 15:29 UTC._
 
 | Date | Link | Shared&nbsp;by | Note |
 |---|---|---|---|
+| 2026-11-28 | [Proving and Improving the Platonic Representation Hypothesis with JEPAs](https://arxiv.org/pdf/2610.39302)<br><sub>Balestriero, LeCun · arXiv · 2026</sub> | Jason Zhang | I didn’t read through all the math just skimmed the intro, but I think it’s pretty cool that you can, with some assumptions, prove that JEPA training (World models) have stronger gaurentees than next token prediction (LLMs) at having similar embedding for the same things when given different data formats or basically better contextual understanding. |
 | 2026-11-27 | [Cogentic: Multi-Agent Orchestration for Automated Proof Discovery](https://arxiv.org/abs/2609.40324)<br><sub>Cai, Gupta, Jiang et al. · arXiv · 2026</sub> | hendry | WE are proving pnp wit hthis |
 | 2026-11-26 | [Global lake synchrony signals rising planetary-scale ecological coupling](https://doi.org/10.1073/pnas.2611874123)<br><sub>Zhang, Han, Gillson et al. · Proceedings of the National Academy of Sciences · 2026</sub> | Xingjian Mu | This paper is really interesting—they talk about how lakes around the world are becoming more and more similar under anthropogenic stressors. They used satellite derived chlorophyll a, water transparency, and sedimentary record, which I think could be of interest to us. |
 | 2026-11-25 | [Reinforcement Learning from Human Feedback](https://rlhfbook.com/)<br><sub>Lambert · RLHF Book · 2025</sub> | hendry | on a serious note the rlhfbook from the same guy is good if you dont like watching youtube: |

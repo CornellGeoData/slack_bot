@@ -1,5 +1,5 @@
 {
- "last_run": "1795797451.9292564",
+ "last_run": "1795879743.1036704",
  "entries": [
   {
    "channel": "C0CJRSZ0420",
@@ -189,6 +189,21 @@
    "in_thread": false,
    "title": "Cogentic: Multi-Agent Orchestration for Automated Proof Discovery",
    "authors": "Cai, Gupta, Jiang et al.",
+   "venue": "arXiv",
+   "year": "2026",
+   "meta_version": 2
+  },
+  {
+   "channel": "C0CJRSZ0420",
+   "page": "research-and-papers",
+   "url": "https://arxiv.org/pdf/2610.39302",
+   "ts": "1795850799.751559",
+   "date": "2026-11-28",
+   "user": "Jason Zhang",
+   "note": "I didn\u2019t read through all the math just skimmed the intro, but I think it\u2019s pretty cool that you can, with some assumptions, prove that JEPA training (World models) have stronger gaurentees than next token prediction (LLMs) at having similar embedding for the same things when given different data formats or basically better contextual understanding.",
+   "in_thread": false,
+   "title": "Proving and Improving the Platonic Representation Hypothesis with JEPAs",
+   "authors": "Balestriero, LeCun",
    "venue": "arXiv",
    "year": "2026",
    "meta_version": 2
